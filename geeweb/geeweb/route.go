@@ -1,6 +1,10 @@
 package geeweb
 
-import "sync"
+import (
+	"net/http"
+	"strings"
+	"sync"
+)
 
 /*
  *path:
@@ -92,19 +96,76 @@ func _search(root *tireNode, parts []string, height int) *tireNode {
 
 type router struct {
 	mu          sync.Mutex
-	roots       map[string]*tire
+	roots       map[MethodType]*tire
 	handleFuncs map[string]HandleFunc
 }
 
 func newRouter() *router {
 	return &router{
 		mu:          sync.Mutex{},
-		roots:       make(map[string]*tire),
+		roots:       make(map[MethodType]*tire),
 		handleFuncs: make(map[string]HandleFunc),
 	}
 }
 
 func (r *router) addRouter(method MethodType, pattern string, handle HandleFunc) {
-	// key := string(method) + "-" + pattern
+	key := string(method) + "-" + pattern
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.handleFuncs[key] = handle
+	root := r.roots[method]
+	if root == nil {
+		root = newTire()
+		r.roots[method] = root
+	}
+	root.insertRoute(pattern, parsePattern(pattern))
+}
 
+func parsePattern(pattern string) []string {
+	items := strings.Split(pattern, "/")
+	var parts []string
+	for _, item := range items {
+		if item != "" {
+			parts = append(parts, item)
+			if item[0] == '*' {
+				break
+			}
+		}
+	}
+	return parts
+}
+
+func (r *router) getRouter(method MethodType, pattern string) *tireNode {
+	items := parsePattern(pattern)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	root := r.roots[method]
+	if root == nil {
+		return nil
+	}
+	return root.searchRoute(items)
+}
+
+func parseURL(rawPattern, pattern string) map[string]string {
+	item1, item2 := parsePattern(rawPattern), parsePattern(pattern)
+	params := make(map[string]string)
+	for i, item := range item1 {
+		if item[0] == ':' {
+			params[item[1:]] = item2[i]
+		} else if item[0] == '*' {
+			params[item[1:]] = strings.Join(item2[i:], "/")
+			break
+		}
+	}
+	return params
+}
+
+func (r *router) handle(c *Context) {
+	if node := r.getRouter(c.Method, c.Path); node != nil {
+		c.Params = parseURL(node.pattern, c.Path)
+		key := string(c.Method) + "-" + node.pattern
+		r.handleFuncs[key](c)
+	} else {
+		c.String(http.StatusNotFound, "404 Not Found: %s\n", c.Path)
+	}
 }
