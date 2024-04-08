@@ -10,19 +10,23 @@ import (
 type H map[string]string
 
 type Context struct {
-	W      http.ResponseWriter
-	R      *http.Request
-	Method MethodType
-	Path   string
-	Params map[string]string //URL中的参数
+	W           http.ResponseWriter
+	R           *http.Request
+	Method      MethodType
+	Path        string
+	Params      map[string]string //URL中的参数
+	MiddleWares []HandlerFunc
+	Index       int
 }
 
 func newContext(w http.ResponseWriter, r *http.Request) *Context {
 	return &Context{
-		W:      w,
-		R:      r,
-		Method: MethodType(r.Method),
-		Path:   r.URL.Path,
+		W:           w,
+		R:           r,
+		Method:      MethodType(r.Method),
+		Path:        r.URL.Path,
+		MiddleWares: make([]HandlerFunc, 0),
+		Index:       -1,
 	}
 }
 
@@ -70,4 +74,10 @@ func (c *Context) HTML(code int, html string) {
 	c.SetStatusCode(code)
 	c.AddHeader("Content-Type", "text/html")
 	c.W.Write([]byte(html))
+}
+
+func (c *Context) Next() {
+	for c.Index++; c.Index < len(c.MiddleWares); c.Index++ {
+		c.MiddleWares[c.Index](c)
+	}
 }

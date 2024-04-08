@@ -97,18 +97,18 @@ func _search(root *tireNode, parts []string, height int) *tireNode {
 type router struct {
 	mu          sync.Mutex
 	roots       map[MethodType]*tire
-	handleFuncs map[string]HandleFunc
+	handleFuncs map[string]HandlerFunc
 }
 
 func newRouter() *router {
 	return &router{
 		mu:          sync.Mutex{},
 		roots:       make(map[MethodType]*tire),
-		handleFuncs: make(map[string]HandleFunc),
+		handleFuncs: make(map[string]HandlerFunc),
 	}
 }
 
-func (r *router) addRouter(method MethodType, pattern string, handle HandleFunc) {
+func (r *router) addRouter(method MethodType, pattern string, handle HandlerFunc) {
 	key := string(method) + "-" + pattern
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -164,8 +164,11 @@ func (r *router) handle(c *Context) {
 	if node := r.getRouter(c.Method, c.Path); node != nil {
 		c.Params = parseURL(node.pattern, c.Path)
 		key := string(c.Method) + "-" + node.pattern
-		r.handleFuncs[key](c)
+		c.MiddleWares = append(c.MiddleWares, r.handleFuncs[key])
 	} else {
-		c.String(http.StatusNotFound, "404 Not Found: %s\n", c.Path)
+		c.MiddleWares = append(c.MiddleWares, func(c *Context) {
+			c.String(http.StatusNotFound, "404 Not Found: %s\n", c.Path)
+		})
 	}
+	c.Next()
 }
