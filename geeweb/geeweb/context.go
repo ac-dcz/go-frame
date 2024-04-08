@@ -26,7 +26,11 @@ func newContext(w http.ResponseWriter, r *http.Request) *Context {
 	}
 }
 
-func (c *Context) FromValue(key string) string {
+func (c *Context) Param(key string) string {
+	return c.Params[key]
+}
+
+func (c *Context) PostForm(key string) string {
 	return c.R.FormValue(key)
 }
 
@@ -60,4 +64,10 @@ func (c *Context) String(code int, format string, v ...interface{}) {
 func (c *Context) Data(code int, data []byte) {
 	c.SetStatusCode(code)
 	c.W.Write(data)
+}
+
+func (c *Context) HTML(code int, html string) {
+	c.SetStatusCode(code)
+	c.AddHeader("Content-Type", "text/html")
+	c.W.Write([]byte(html))
 }

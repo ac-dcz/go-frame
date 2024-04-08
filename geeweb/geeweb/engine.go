@@ -1,6 +1,7 @@
 package geeweb
 
 import (
+	"log"
 	"net/http"
 	"strings"
 )
@@ -34,8 +35,14 @@ func NewEngine() *Engine {
 	return e
 }
 
+func (e *Engine) Run(addr string) error {
+	log.Printf("Listen to %s \n", addr)
+	return http.ListenAndServe(addr, e)
+}
+
 func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c := newContext(w, r)
+	log.Printf("[%s] %s", c.Method, c.Path)
 	e.router.handle(c)
 }
 

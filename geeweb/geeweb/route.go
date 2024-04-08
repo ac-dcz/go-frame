@@ -82,7 +82,7 @@ func (tr *tire) searchRoute(parts []string) *tireNode {
 }
 
 func _search(root *tireNode, parts []string, height int) *tireNode {
-	if height == len(parts) || root.part[0] == '*' {
+	if height == len(parts) || (len(root.part) > 0 && root.part[0] == '*') {
 		return root
 	}
 	childs := root.findAllChild(parts[height])
