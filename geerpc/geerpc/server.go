@@ -13,3 +13,6 @@ var DefaultOption = Option{
 	SecretKey: MagicNum,
 	CodecType: codec.GobType,
 }
+
+type Server struct {
+}
