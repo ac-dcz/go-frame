@@ -1,7 +1,9 @@
 package geerpc
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"geerpc/codec"
 	"net"
 	"sync"
@@ -104,4 +106,81 @@ func (client *RPCClient) run() {
 		}
 	}
 	client.terminalAllCalls(err)
+}
+
+func parseOptions(opts ...Option) Option {
+	if len(opts) == 0 {
+		return DefaultOption
+	} else if opts[0].SecretKey != MagicNum {
+		return DefaultOption
+	}
+	return opts[0]
+}
+
+func NewRPCClient(network, addr string, opts ...Option) (*RPCClient, error) {
+	opt := parseOptions(opts...)
+	conn, err := net.Dial(network, addr)
+	if err != nil {
+		return nil, err
+	}
+	return newRPCClient(conn, opt)
+}
+
+func newRPCClient(conn net.Conn, opt Option) (*RPCClient, error) {
+	codecFunc := codec.DefaultCodecFuncMap(opt.CodecType)
+	if codecFunc == nil {
+		return nil, fmt.Errorf("rpc client: invaild codecType %d", opt.CodecType)
+	}
+	if err := json.NewEncoder(conn).Encode(opt); err != nil {
+		return nil, fmt.Errorf("rpc client: encode opt error %v", err)
+	}
+	client := &RPCClient{
+		opt:     &opt,
+		cmu:     sync.Mutex{},
+		calls:   make(map[int]*Call),
+		conn:    conn,
+		cc:      codecFunc(conn),
+		sending: sync.Mutex{},
+		req:     0,
+		close:   atomic.Bool{},
+	}
+	client.close.Store(false)
+	go client.run()
+	return client, nil
+}
+
+func (client *RPCClient) sendCall(serviceName string, argv any, replyv any) *Call {
+	call := &Call{
+		ServiceName: serviceName,
+		Argv:        argv,
+		Replyv:      replyv,
+		Error:       nil,
+		Done:        make(chan *Call, 1),
+	}
+	if err := client.registryCall(call); err != nil {
+		call.Error = err
+		call.done()
+		return call
+	}
+	header := &codec.Header{
+		ServiceMethod: serviceName,
+		Error:         "",
+		Seq:           call.Req,
+	}
+	if err := client.cc.Write(header, call.Argv); err != nil {
+		client.removeCall(call.Req)
+		call.Error = err
+		call.done()
+		return call
+	}
+	return call
+}
+
+func (client *RPCClient) Do(serviceName string, argv any, replyv any) *Call {
+	return <-client.DoChan(serviceName, argv, replyv)
+}
+
+func (client *RPCClient) DoChan(serviceName string, argv any, replyv any) <-chan *Call {
+	call := client.sendCall(serviceName, argv, replyv)
+	return call.Done
 }
