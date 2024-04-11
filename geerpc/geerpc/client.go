@@ -47,7 +47,7 @@ func (client *RPCClient) Close() error {
 }
 
 func (client *RPCClient) IsAvaiable() bool {
-	return client.close.Load() == false
+	return !client.close.Load()
 }
 
 func (client *RPCClient) registryCall(c *Call) error {
