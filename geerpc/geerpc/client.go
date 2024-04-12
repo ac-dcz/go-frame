@@ -127,8 +127,8 @@ func NewRPCClient(network, addr string, opts ...Option) (*RPCClient, error) {
 }
 
 func newRPCClient(conn net.Conn, opt Option) (*RPCClient, error) {
-	codecFunc := codec.DefaultCodecFuncMap(opt.CodecType)
-	if codecFunc == nil {
+	codecFunc, ok := codec.DefaultCodecFuncMap(opt.CodecType)
+	if !ok {
 		return nil, fmt.Errorf("rpc client: invaild codecType %d", opt.CodecType)
 	}
 	if err := json.NewEncoder(conn).Encode(opt); err != nil {

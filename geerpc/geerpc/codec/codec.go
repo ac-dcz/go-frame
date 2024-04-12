@@ -31,6 +31,7 @@ func init() {
 	defaultCodecFuncMap[GobType] = newGobCodec
 }
 
-func DefaultCodecFuncMap(typ CodecType) newCodecFunc {
-	return defaultCodecFuncMap[typ]
+func DefaultCodecFuncMap(typ CodecType) (newCodecFunc, bool) {
+	f, ok := defaultCodecFuncMap[typ]
+	return f, ok
 }

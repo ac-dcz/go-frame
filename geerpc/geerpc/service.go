@@ -39,7 +39,7 @@ func (mType *methodType) NumCalls() int {
 }
 
 type abcService struct {
-	name    string
+	Name    string
 	selfVal reflect.Value
 	selfTyp reflect.Type
 	methods map[string]*methodType
@@ -51,9 +51,9 @@ func newAbcService(srvc any) (*abcService, error) {
 		selfTyp: reflect.TypeOf(srvc),
 		methods: make(map[string]*methodType),
 	}
-	service.name = reflect.Indirect(service.selfVal).Type().Name()
-	if !ast.IsExported(service.name) {
-		return nil, fmt.Errorf("service name %s is not exported", service.name)
+	service.Name = reflect.Indirect(service.selfVal).Type().Name()
+	if !ast.IsExported(service.Name) {
+		return nil, fmt.Errorf("service name %s is not exported", service.Name)
 	}
 	service.registryMethod()
 	return service, nil
