@@ -1,6 +1,7 @@
 package geerpc
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,10 +9,11 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 var (
-	ErrClientShutDown = errors.New("Client have shutdown already")
+	ErrClientShutDown = errors.New("client have shutdown already")
 )
 
 type Call struct {
@@ -20,11 +22,13 @@ type Call struct {
 	Replyv      interface{} //pointer
 	Error       error       // 调用返回值
 	Req         int         // 序号
-	Done        chan *Call  // callback
+	Finish      atomic.Bool
+	Done        chan *Call // callback
 }
 
 func (c *Call) done() {
-	c.Done <- <-c.Done
+	c.Finish.Store(true)
+	c.Done <- c
 }
 
 type RPCClient struct {
@@ -126,6 +130,38 @@ func NewRPCClient(network, addr string, opts ...Option) (*RPCClient, error) {
 	return newRPCClient(conn, opt)
 }
 
+func NewRPCClientWithTimeOut(network, addr string, timeout time.Duration, opts ...Option) (*RPCClient, error) {
+	if timeout <= 0 {
+		return NewRPCClient(network, addr, opts...)
+	}
+	result := make(chan struct {
+		client *RPCClient
+		err    error
+	}, 1)
+	opt := parseOptions(opts...)
+	go func() {
+
+		conn, err := net.DialTimeout(network, addr, timeout)
+		if err != nil {
+			result <- struct {
+				client *RPCClient
+				err    error
+			}{nil, err}
+		}
+		client, err := newRPCClient(conn, opt)
+		result <- struct {
+			client *RPCClient
+			err    error
+		}{client, err}
+	}()
+	select {
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("rpc client: connect timeout: expect within %s", timeout)
+	case ret := <-result:
+		return ret.client, ret.err
+	}
+}
+
 func newRPCClient(conn net.Conn, opt Option) (*RPCClient, error) {
 	codecFunc, ok := codec.DefaultCodecFuncMap(opt.CodecType)
 	if !ok {
@@ -155,8 +191,10 @@ func (client *RPCClient) sendCall(serviceName string, argv any, replyv any) *Cal
 		Argv:        argv,
 		Replyv:      replyv,
 		Error:       nil,
+		Finish:      atomic.Bool{},
 		Done:        make(chan *Call, 1),
 	}
+	call.Finish.Store(false)
 	if err := client.registryCall(call); err != nil {
 		call.Error = err
 		call.done()
@@ -167,6 +205,8 @@ func (client *RPCClient) sendCall(serviceName string, argv any, replyv any) *Cal
 		Error:         "",
 		Seq:           call.Req,
 	}
+	client.sending.Lock()
+	defer client.sending.Unlock()
 	if err := client.cc.Write(header, call.Argv); err != nil {
 		client.removeCall(call.Req)
 		call.Error = err
@@ -176,11 +216,22 @@ func (client *RPCClient) sendCall(serviceName string, argv any, replyv any) *Cal
 	return call
 }
 
-func (client *RPCClient) Do(serviceName string, argv any, replyv any) *Call {
-	return <-client.DoChan(serviceName, argv, replyv)
+func (client *RPCClient) Do(ctx context.Context, serviceName string, argv any, replyv any) (context.Context, error) {
+	notify := client.DoChan(serviceName, argv, replyv)
+	select {
+	case <-ctx.Done():
+		return ctx, fmt.Errorf("rpc client: call failed: %v", ctx.Err().Error())
+	case err := <-notify:
+		return ctx, err
+	}
 }
 
-func (client *RPCClient) DoChan(serviceName string, argv any, replyv any) <-chan *Call {
+func (client *RPCClient) DoChan(serviceName string, argv any, replyv any) <-chan error {
 	call := client.sendCall(serviceName, argv, replyv)
-	return call.Done
+	notify := make(chan error, 1)
+	go func() {
+		c := <-call.Done
+		notify <- c.Error
+	}()
+	return notify
 }

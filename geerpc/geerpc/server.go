@@ -9,18 +9,21 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 )
 
 const MagicNum = 0xbeffffeb
 
 type Option struct {
-	SecretKey uint
-	CodecType codec.CodecType
+	SecretKey  uint
+	CodecType  codec.CodecType
+	HandleTime time.Duration
 }
 
 var DefaultOption = Option{
-	SecretKey: MagicNum,
-	CodecType: codec.GobType,
+	SecretKey:  MagicNum,
+	CodecType:  codec.GobType,
+	HandleTime: 0,
 }
 
 var (
@@ -91,10 +94,10 @@ func (server *Server) handleConn(conn net.Conn) {
 		log.Printf("rpc server: not found codec function\n")
 		return
 	}
-	server.handleCodec(codecFunc(conn))
+	server.handleCodec(codecFunc(conn), opt)
 }
 
-func (server *Server) handleCodec(cc codec.Codec) {
+func (server *Server) handleCodec(cc codec.Codec, opt *Option) {
 	sending := &sync.Mutex{}
 	wg := &sync.WaitGroup{}
 	for {
@@ -108,8 +111,9 @@ func (server *Server) handleCodec(cc codec.Codec) {
 			server.handleResponse(cc, req.H, ErrInvaildRequest, sending)
 			continue
 		}
+		log.Printf("rpc server: request %s\n", req.H.ServiceMethod)
 		wg.Add(1)
-		go server.handleRequest(cc, req, sending, wg)
+		go server.handleRequest(cc, req, sending, wg, opt)
 	}
 	wg.Wait()
 }
@@ -157,13 +161,30 @@ func (server *Server) findService(servcieMethod string) (*abcService, *methodTyp
 	return srvc, mtype, nil
 }
 
-func (server *Server) handleRequest(cc codec.Codec, req *Request, sending *sync.Mutex, wg *sync.WaitGroup) {
+func (server *Server) handleRequest(cc codec.Codec, req *Request, sending *sync.Mutex, wg *sync.WaitGroup, opt *Option) {
 	defer wg.Done()
-	err := req.Srvc.Call(req.Mtype, req.Argv, req.Replyv)
-	if err != nil {
-		req.H.Error = err.Error()
+	notify := make(chan struct{})
+	go func() {
+		err := req.Srvc.Call(req.Mtype, req.Argv, req.Replyv)
+		if err != nil {
+			req.H.Error = err.Error()
+			close(notify)
+			return
+		}
+		server.handleResponse(cc, req.H, req.Replyv.Interface(), sending)
+		close(notify)
+	}()
+	if opt.HandleTime <= 0 {
+		<-notify
+		return
 	}
-	server.handleResponse(cc, req.H, req.Replyv.Interface(), sending)
+	select {
+	case <-time.After(opt.HandleTime):
+		req.H.Error = fmt.Sprintf("rpc server: request handle timeout: expect within %s", opt.HandleTime)
+		server.handleResponse(cc, req.H, ErrInvaildRequest, sending)
+	case <-notify:
+		return
+	}
 }
 
 func (server *Server) handleResponse(cc codec.Codec, h *codec.Header, body any, sending *sync.Mutex) {
