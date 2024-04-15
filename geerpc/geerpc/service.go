@@ -38,6 +38,16 @@ func (mType *methodType) NumCalls() int {
 	return int(mType.numCalls.Load())
 }
 
+func (mType *methodType) Call(values []reflect.Value) error {
+	defer mType.numCalls.Add(1)
+	F := mType.method.Func
+	out := F.Call(values)
+	if inte := out[0].Interface(); inte != nil {
+		return inte.(error)
+	}
+	return nil
+}
+
 type abcService struct {
 	Name    string
 	selfVal reflect.Value
@@ -80,4 +90,9 @@ func (srvc *abcService) registryMethod() {
 		}
 		srvc.methods[method.Name] = mType
 	}
+}
+
+func (srvc *abcService) Call(mtype *methodType, values ...reflect.Value) error {
+	values = append([]reflect.Value{srvc.selfVal}, values...)
+	return mtype.Call(values)
 }
