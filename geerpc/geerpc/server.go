@@ -101,11 +101,12 @@ func (server *Server) handleCodec(cc codec.Codec) {
 		req, err := server.readRequest(cc)
 		if err != nil {
 			log.Printf("rpc server: %v\n", err)
-			if req != nil {
-				server.handleResponse(cc, req.H, ErrInvaildRequest, sending)
-				continue
+			if req == nil {
+				break
 			}
-			break
+			req.H.Error = err.Error()
+			server.handleResponse(cc, req.H, ErrInvaildRequest, sending)
+			continue
 		}
 		wg.Add(1)
 		go server.handleRequest(cc, req, sending, wg)
