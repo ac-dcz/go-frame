@@ -26,7 +26,11 @@ func NewClause() *Clause {
 }
 
 func (c *Clause) Set(typ SqlType, vars ...any) *Clause {
-
+	if gen, ok := defaultGenerator[typ]; ok {
+		ts, tv := gen(vars...)
+		c.sql[typ] = ts
+		c.vars[typ] = tv
+	}
 	return c
 }
 
